@@ -96,3 +96,4 @@ Error receiving throttle position: 'NoneType' object has no attribute 'magnitude
 Error receiving engine runtime: 'NoneType' object has no attribute 'magnitude'
 Error receiving RPM: 'NoneType' object has no attribute 'magnitude'
 Error receiving RPM: 'NoneType' object has no attribute 'magnitude'
+Error receiving absolute load: 'NoneType' object has no attribute 'magnitude'

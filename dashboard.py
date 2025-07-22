@@ -33,7 +33,7 @@ class CheckEngine(QObject):
 class GPSSpeedReader(QObject):
     speedUpdated = pyqtSignal(float)
 
-    def __init__(self, port="COM5", baud=9600, parent=None):
+    def __init__(self, port="COM4", baud=9600, parent=None):
         super().__init__(parent)
         self.port = serial.Serial(port, baudrate=baud, timeout=1)
         self.timer = QTimer(self)
@@ -155,7 +155,7 @@ class CenterScreenWidget(QObject):
 # — Utility Functions —
 
 def make_connection():
-    conn = obd.OBD(portstr="COM4", check_voltage=False)
+    conn = obd.OBD(portstr="COM3", check_voltage=False)
     return conn, conn.status() == OBDStatus.CAR_CONNECTED
 
 
@@ -184,7 +184,7 @@ if __name__ == "__main__":
     throttleAcceleratorLabel = BarMeter()
     absoluteLoadLabel = BarMeter()
     cel = CheckEngine()
-    gps = GPSSpeedReader("COM5")
+    gps = GPSSpeedReader("COM4")
 
     # Expose to QML
     ctx = engine.rootContext()
