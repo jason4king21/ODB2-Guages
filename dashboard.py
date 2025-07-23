@@ -8,6 +8,16 @@ import serial, pynmea2
 
 # — Helper Classes —
 
+def set_update_rate(port="/dev/ttyACM0", rate_ms=100):
+    cmd = f"$PMTK220,{rate_ms}*"
+    # Compute checksum
+    cs = 0
+    for c in cmd[1:]:
+        cs ^= ord(c)
+    full = f"{cmd}{cs:02X}\r\n"
+    with serial.Serial(port, 9600, timeout=1) as s:
+        s.write(full.encode())
+
 class CheckEngine(QObject):
     milChanged = pyqtSignal()
     dtcCountChanged = pyqtSignal()
@@ -33,21 +43,21 @@ class CheckEngine(QObject):
 class GPSSpeedReader(QObject):
     speedUpdated = pyqtSignal(float)
 
-    def __init__(self, port="COM4", baud=9600, parent=None):
+    def __init__(self, port="/dev/ttyACM0", baud=115200, parent=None):
         super().__init__(parent)
         self.port = serial.Serial(port, baudrate=baud, timeout=1)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.read_speed)
-        self.timer.start(1000)
+        self.timer.start(100)
 
     def read_speed(self):
         try:
             raw = self.port.readline().decode('ascii', errors='ignore').strip()
             if raw.startswith('$GPRMC'):
                 msg = pynmea2.parse(raw)
-                knots = msg.spd_over_grnd
-                speed = float(knots) * 1.15078 if knots else 0.0
-                self.speedUpdated.emit(speed)
+                speed_knots = msg.spd_over_grnd or 0
+                speed_mph = speed_knots * 1.15078
+                self.speedUpdated.emit(round(speed_mph))
         except:
             pass
 
@@ -155,7 +165,7 @@ class CenterScreenWidget(QObject):
 # — Utility Functions —
 
 def make_connection():
-    conn = obd.OBD(portstr="COM3", check_voltage=False)
+    conn = obd.OBD(portstr="/dev/ttyUSB0", check_voltage=False)
     return conn, conn.status() == OBDStatus.CAR_CONNECTED
 
 
@@ -166,6 +176,8 @@ if __name__ == "__main__":
     view = QQuickView()
     engine = view.engine()
     engine.addImportPath(os.path.join(os.getcwd(), "qml"))
+
+    set_update_rate("/dev/ttyACM0", 100)
 
     # Instantiate
     temperature = BarMeter()
@@ -184,7 +196,7 @@ if __name__ == "__main__":
     throttleAcceleratorLabel = BarMeter()
     absoluteLoadLabel = BarMeter()
     cel = CheckEngine()
-    gps = GPSSpeedReader("COM4")
+    gps = GPSSpeedReader("/dev/ttyACM0")
 
     # Expose to QML
     ctx = engine.rootContext()
@@ -219,7 +231,8 @@ if __name__ == "__main__":
 
     def update_all():
         centerScreen.update_now()
-
+        # Wire GPS -> Speedometer
+        gps.speedUpdated.connect(speedometer.updateSpeed)
         if car_ready:
             resp = connection.query(commands.STATUS)
             cel.mil = bool(resp.value.MIL)
@@ -248,6 +261,6 @@ if __name__ == "__main__":
 
     poll_timer = QTimer()
     poll_timer.timeout.connect(update_all)
-    poll_timer.start(200)
+    poll_timer.start(100)
 
     sys.exit(app.exec_())
