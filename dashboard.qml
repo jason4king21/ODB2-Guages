@@ -59,6 +59,9 @@ Rectangle {
         }
     }
 
+    
+
+
     Labels {
         id: label1
         label: "Intake Pressure"
@@ -66,9 +69,9 @@ Rectangle {
         unit: "kPa"
         fontSize: 18
         color: "white"
-        borderColor: "#FF0000"
-        borderWidth: 2
-        borderRadius: 10
+        borderColor: "#FF0000" // Example border color
+        borderWidth: 2 // Example border width
+        borderRadius: 10 // Example border radius for rounded corners
         anchors.right: label2.left
         anchors.rightMargin: 10
         anchors.verticalCenter: label2.verticalCenter
@@ -81,9 +84,9 @@ Rectangle {
         unit: "°C"
         fontSize: 18
         color: "white"
-        borderColor: "#FF0000"
-        borderWidth: 2
-        borderRadius: 10
+        borderColor: "#FF0000" // Example border color
+        borderWidth: 2 // Example border width
+        borderRadius: 10 // Example border radius for rounded corners
         anchors.right: label3.left
         anchors.rightMargin: 10
         anchors.verticalCenter: label3.verticalCenter
@@ -95,9 +98,9 @@ Rectangle {
         currValue: runtimeLabel.currValue
         fontSize: 18
         color: "white"
-        borderColor: "#FF0000"
-        borderWidth: 2
-        borderRadius: 10
+        borderColor: "#FF0000" // Example border color
+        borderWidth: 2 // Example border width
+        borderRadius: 10 // Example border radius for rounded corners
         anchors.top: parent.top
         anchors.topMargin: 10
         anchors.horizontalCenter: parent.horizontalCenter
@@ -110,9 +113,9 @@ Rectangle {
         unit: "%"
         fontSize: 18
         color: "white"
-        borderColor: "#FF0000"
-        borderWidth: 2
-        borderRadius: 10
+        borderColor: "#FF0000" // Example border color
+        borderWidth: 2 // Example border width
+        borderRadius: 10 // Example border radius for rounded corners
         anchors.left: label3.right
         anchors.leftMargin: 10
         anchors.verticalCenter: label3.verticalCenter
@@ -124,9 +127,9 @@ Rectangle {
         currValue: fuelTypeLabel.currValue
         fontSize: 18
         color: "white"
-        borderColor: "#FF0000"
-        borderWidth: 2
-        borderRadius: 10
+        borderColor: "#FF0000" // Example border color
+        borderWidth: 2 // Example border width
+        borderRadius: 10 // Example border radius for rounded corners
         anchors.left: label4.right
         anchors.leftMargin: 10
         anchors.verticalCenter: label4.verticalCenter
@@ -139,9 +142,9 @@ Rectangle {
         unit: "%"
         fontSize: 18
         color: "white"
-        borderColor: "#FF0000"
-        borderWidth: 2
-        borderRadius: 10
+        borderColor: "#FF0000" // Example border color
+        borderWidth: 2 // Example border width
+        borderRadius: 10 // Example border radius for rounded corners
         anchors.top: label1.bottom
         anchors.topMargin: 5
         anchors.horizontalCenter: label1.horizontalCenter
@@ -154,9 +157,9 @@ Rectangle {
         unit: "%"
         fontSize: 18
         color: "white"
-        borderColor: "#FF0000"
-        borderWidth: 2
-        borderRadius: 10
+        borderColor: "#FF0000" // Example border color
+        borderWidth: 2 // Example border width
+        borderRadius: 10 // Example border radius for rounded corners
         anchors.top: label2.bottom
         anchors.topMargin: 5
         anchors.horizontalCenter: label2.horizontalCenter
@@ -169,9 +172,9 @@ Rectangle {
         unit: "kPa"
         fontSize: 18
         color: "white"
-        borderColor: "#FF0000"
-        borderWidth: 2
-        borderRadius: 10
+        borderColor: "#FF0000" // Example border color
+        borderWidth: 2 // Example border width
+        borderRadius: 10 // Example border radius for rounded corners
         anchors.top: label3.bottom
         anchors.topMargin: 5
         anchors.horizontalCenter: label3.horizontalCenter
@@ -202,9 +205,9 @@ Rectangle {
         unit: "%"
         fontSize: 18
         color: "white"
-        borderColor: "#FF0000"
-        borderWidth: 2
-        borderRadius: 10
+        borderColor: "#FF0000" // Example border color
+        borderWidth: 2 // Example border width
+        borderRadius: 10 // Example border radius for rounded corners
         anchors.top: label4.bottom
         anchors.topMargin: 5
         anchors.horizontalCenter: label4.horizontalCenter
@@ -217,9 +220,9 @@ Rectangle {
         unit: "%"
         fontSize: 18
         color: "white"
-        borderColor: "#FF0000"
-        borderWidth: 2
-        borderRadius: 10
+        borderColor: "#FF0000" // Example border color
+        borderWidth: 2 // Example border width
+        borderRadius: 10 // Example border radius for rounded corners
         anchors.top: label5.bottom
         anchors.topMargin: 5
         anchors.horizontalCenter: label5.horizontalCenter
@@ -227,89 +230,73 @@ Rectangle {
 
     BarMeter {
         id: temperatureBar
+
         mainValue: temperature.currValue
         maxValue: 200
+
         label_name: "Temperature(Coolant)"
         unitValue: "°C"
-        color: "transparent"
+
+        color: "transparent"    // Only changes the background color with the labels
+
         anchors.left: parent.left
         anchors.leftMargin: 20
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 20
+
     }
 
     BarMeter {
         id: batteryBar
+
         mainValue: battery_capacity.currValue
         maxValue: 100
+
         label_name: "Fuel"
         unitValue: "%"
-        color: "transparent"
+
+        color: "transparent"    // Only changes the background color with the labels
+
         anchors.right: parent.right
         anchors.rightMargin: 20
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 20
+
     }
+
+    
 
     Button {
         id: switchButton
-        property string color: "black"
+        property string color: "black" // Text color
         Rectangle {
-            property string color: "red"
-            border.color: "white"
-            border.width: 2
-            radius: 10
+            property string color: "red" // Button background color
+            border.color: "white" // Button border color
+            border.width: 2 // Button border width
+            radius: 10 // Rounded corners
         }
-        width: 40
-        height: 40
+        width: 40 // Adjust the width of the button
+        height: 40 // Adjust the height of the button
 
         MouseArea {
             anchors.fill: parent
-            onClicked: {
+                onClicked: {
                 console.log("Button clicked")
+                // Add any actions you want the button to perform here
                 try {
                     ld.source = "Second_row.qml"
                 } catch (error) {
                     console.error(error);
                 }
+                
             }
         }
 
-        Loader {
+        Loader{
             id: ld
             anchors.centerIn: dashboardGUI
         }
     }
+    
 
-    Keys.onPressed: {
-        if (event.key === Qt.Key_Escape) Qt.quit()
-    }
-
-    Rectangle {
-        id: exitButton
-        width: 80
-        height: 40
-        anchors.top: parent.top
-        anchors.right: parent.right
-        anchors.topMargin: 10
-        anchors.rightMargin: 10
-        radius: 5
-        color: "#aa0000"
-        border.color: "white"
-        border.width: 1
-
-        Text {
-            anchors.centerIn: parent
-            text: "Exit"
-            color: "white"
-            font.pixelSize: 16
-        }
-
-        MouseArea {
-            id: exitMouseArea
-            anchors.fill: parent
-            onPressAndHold: Qt.quit()
-            pressAndHoldInterval: 1000
-        }
-    }
-} 
+}

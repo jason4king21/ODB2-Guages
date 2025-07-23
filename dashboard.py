@@ -178,8 +178,8 @@ if __name__ == "__main__":
     engine.addImportPath(os.path.join(os.getcwd(), "qml"))
 
     # This makes it full screen
-    view.setFlags(Qt.FramelessWindowHint)
-    view.showFullScreen()
+    # view.setFlags(Qt.FramelessWindowHint)
+    # view.showFullScreen()
 
     set_update_rate("/dev/ttyACM0", 100)
 
