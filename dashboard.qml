@@ -297,6 +297,9 @@ Rectangle {
             anchors.centerIn: dashboardGUI
         }
     }
+    Keys.onPressed: {
+        if (event.key === Qt.Key_Escape) Qt.quit()
+    }
 
 
 }
