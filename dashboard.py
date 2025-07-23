@@ -221,7 +221,7 @@ if __name__ == "__main__":
     ctx.setContextProperty("centerScreen", centerScreen)
     ctx.setContextProperty("checkEngine", cel)
 
-    view.setSource(QUrl('dashboard.qml'))
+    view.setSource(QUrl.fromLocalFile("/home/kyle/ODB2-Guages/dashboard.qml"))
     view.show()
 
     # Connect to OBD
