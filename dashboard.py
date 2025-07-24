@@ -5,6 +5,22 @@ from PyQt5.QtQuick import QQuickView
 import py_obd, obd
 from obd import commands, OBDStatus
 import serial, pynmea2
+import platform
+
+def get_serial_ports():
+    is_pi = platform.system() == "Linux" and "arm" in platform.machine()
+
+    if is_pi:
+        gps_port = "/dev/ttyACM0"
+        obd_port = "/dev/ttyUSB0"
+        qml_file = "/home/kyle/ODB2-Guages/dashboard.qml"
+    else:
+        gps_port = "COM5"   # You can change to your GPS COM port on PC
+        obd_port = "COM4"   # Change to your actual OBD-II COM port on PC
+        # qml_file = os.path.join(os.path.dirname(__file__), "ODB2-Guages/dashboard.qml")
+        qml_file = os.path.join(os.getcwd(), "dashboard.qml")
+
+    return gps_port, obd_port, qml_file
 
 # — Helper Classes —
 
@@ -165,7 +181,7 @@ class CenterScreenWidget(QObject):
 # — Utility Functions —
 
 def make_connection():
-    conn = obd.OBD(portstr="/dev/ttyUSB0", check_voltage=False)
+    conn = obd.OBD(portstr=obd_port, check_voltage=False)
     return conn, conn.status() == OBDStatus.CAR_CONNECTED
 
 
@@ -177,11 +193,13 @@ if __name__ == "__main__":
     engine = view.engine()
     engine.addImportPath(os.path.join(os.getcwd(), "qml"))
 
+    gps_port, obd_port, qml_file = get_serial_ports()
+
     # This makes it full screen
     # view.setFlags(Qt.FramelessWindowHint)
     # view.showFullScreen()
 
-    set_update_rate("/dev/ttyACM0", 100)
+    set_update_rate(gps_port, 100)
 
     # Instantiate
     temperature = BarMeter()
@@ -200,7 +218,9 @@ if __name__ == "__main__":
     throttleAcceleratorLabel = BarMeter()
     absoluteLoadLabel = BarMeter()
     cel = CheckEngine()
-    gps = GPSSpeedReader("/dev/ttyACM0")
+    gps = GPSSpeedReader(gps_port)
+    oilPressureLabel = BarMeter()
+
 
     # Expose to QML
     ctx = engine.rootContext()
@@ -220,8 +240,11 @@ if __name__ == "__main__":
     ctx.setContextProperty("absoluteLoadLabel", absoluteLoadLabel)
     ctx.setContextProperty("centerScreen", centerScreen)
     ctx.setContextProperty("checkEngine", cel)
+    ctx.setContextProperty("oilPressureLabel", oilPressureLabel)
 
-    view.setSource(QUrl.fromLocalFile("/home/kyle/ODB2-Guages/dashboard.qml"))
+
+    # view.setSource(QUrl.fromLocalFile("/home/kyle/ODB2-Guages/dashboard.qml"))
+    view.setSource(QUrl.fromLocalFile(qml_file))
     view.show()
 
     # Connect to OBD
@@ -250,6 +273,8 @@ if __name__ == "__main__":
             barometricPressureLabel.currValue = py_obd.get_intake_pressure(connection) or 0
             intakeTempLabel.currValue = py_obd.get_intake_temp(connection) or 0
             absoluteLoadLabel.currValue = py_obd.get_absolute_load(connection) or 0
+            oilPressureLabel.currValue = py_obd.get_oil_pressure(connection) or 0
+
         else:
             # Reset values if disconnected
             rpmmeter.currRPM = 0
@@ -260,8 +285,10 @@ if __name__ == "__main__":
             barometricPressureLabel.currValue = 0
             intakeTempLabel.currValue = 0
             absoluteLoadLabel.currValue = 0
-            cel.mil = False
-            cel.dtcCount = 0
+            cel.mil = True
+            cel.dtcCount = 10
+            oilPressureLabel.currValue = 0
+
 
     poll_timer = QTimer()
     poll_timer.timeout.connect(update_all)
