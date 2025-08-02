@@ -9,18 +9,26 @@ import platform
 
 def get_serial_ports():
     import platform
-    is_pi = platform.system() == "Linux" and "arm" in platform.machine()
+    import os
+
+    # More reliable check for Raspberry Pi
+    is_pi = os.uname().machine.startswith("arm") or os.uname().machine.startswith("aarch")
 
     if is_pi:
-        gps_port = "/dev/ttyACM0"
+        gps_port = "/dev/ttyACM0"   # Double-check these with `ls /dev/tty*`
         obd_port = "/dev/ttyUSB0"
         qml_file = "/home/kyle/ODB2-Guages/dashboard.qml"
     else:
-        gps_port = "COM5"   # Windows fallback
+        gps_port = "COM5"
         obd_port = "COM4"
         qml_file = os.path.join(os.getcwd(), "dashboard.qml")
 
+    print("[INFO] Detected Raspberry Pi:", is_pi)
+    print("[INFO] GPS Port:", gps_port)
+    print("[INFO] OBD Port:", obd_port)
+    print("[INFO] QML Path:", qml_file)
     return gps_port, obd_port, qml_file
+
 
 
 # — Helper Classes —
