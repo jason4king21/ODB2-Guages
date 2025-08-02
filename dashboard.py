@@ -8,6 +8,7 @@ import serial, pynmea2
 import platform
 
 def get_serial_ports():
+    import platform
     is_pi = platform.system() == "Linux" and "arm" in platform.machine()
 
     if is_pi:
@@ -15,12 +16,12 @@ def get_serial_ports():
         obd_port = "/dev/ttyUSB0"
         qml_file = "/home/kyle/ODB2-Guages/dashboard.qml"
     else:
-        gps_port = "COM5"   # You can change to your GPS COM port on PC
-        obd_port = "COM4"   # Change to your actual OBD-II COM port on PC
-        # qml_file = os.path.join(os.path.dirname(__file__), "ODB2-Guages/dashboard.qml")
+        gps_port = "COM5"   # Windows fallback
+        obd_port = "COM4"
         qml_file = os.path.join(os.getcwd(), "dashboard.qml")
 
     return gps_port, obd_port, qml_file
+
 
 # — Helper Classes —
 
