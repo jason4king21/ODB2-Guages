@@ -6,7 +6,7 @@ import threading
 
 # Settings
 GPIO_PIN = 17          # BCM pin 17 = physical pin 11
-DELAY_SECONDS = 10     # Delay before shutdown
+DELAY_SECONDS = 3     # Delay before shutdown
 
 # Setup
 shutdown_pin = Button(GPIO_PIN, pull_up=True)
