@@ -8,7 +8,7 @@ import QtGraphicalEffects 1.0
 
 Rectangle {
     width: 1024
-    height: 600
+    height: 575
     color: "#000000"
 
     // Define an enumeration for the car states
