@@ -6,6 +6,9 @@ import py_obd, obd
 from obd import commands, OBDStatus
 import serial, pynmea2
 
+connection = None
+last_reconnect = 0.0
+
 def get_serial_ports():
     # More reliable check for Raspberry Pi
     is_pi = os.uname().machine.startswith("arm") or os.uname().machine.startswith("aarch")
@@ -283,8 +286,7 @@ if __name__ == "__main__":
         cel.dtcCount = 0
 
     def update_all():
-        nonlocal last_reconnect
-        nonlocal connection
+        global last_reconnect, connection
 
         centerScreen.update_now()
 
