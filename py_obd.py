@@ -283,11 +283,11 @@ def _decode_gm_oil_pressure(messages):
 
 # Define the custom command once
 GM_OIL_PRESSURE = OBDCommand(
-    name="GM_OIL_PRESSURE",
-    desc="GM Enhanced Oil Pressure (psi) via Mode 22 PID 115C",
-    command="22115C",
-    bytes_returned=4,           # expected payload length (approx)
-    decoder=_decode_gm_oil_pressure,
+    "GM_OIL_PRESSURE",
+    "GM Enhanced Oil Pressure (psi) via Mode 22 PID 115C",
+    "22115C",
+    4,                       # bytes_returned (positional)
+    _decode_gm_oil_pressure,
     ecu=ECU.ENGINE,
     fast=False
 )
