@@ -196,7 +196,7 @@ def get_temperature(connection: obd.OBD) -> float:
         if r is None or r.value is None:
             return 0.0
         # Pint Quantity supports .to("degF")
-        return float(r.value.to("degF").magnitude)
+        return float(r.value.to("degF").magnitude).__round__(1)
     except Exception:
         return 0.0
 
