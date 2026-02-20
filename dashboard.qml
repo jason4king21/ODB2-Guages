@@ -84,7 +84,7 @@ Rectangle {
     //    id: label2
     //    label: "Intake Temp"
     //    currValue: intakeTempLabel.currValue
-    //    unit: "°C"
+    //    unit: "°F"
     //    fontSize: 18
     //    color: "white"
     //    borderColor: "#FF0000" // Example border color
