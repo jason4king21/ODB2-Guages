@@ -190,7 +190,15 @@ def get_rpm(connection: obd.OBD) -> float:
 
 
 def get_temperature(connection: obd.OBD) -> float:
-    return query_obd(connection, obd.commands.COOLANT_TEMP, 0.0, "Error receiving coolant temperature")
+    # python-OBD returns coolant temp in °C; convert to °F for the dash
+    try:
+        r = connection.query(obd.commands.COOLANT_TEMP)
+        if r is None or r.value is None:
+            return 0.0
+        # Pint Quantity supports .to("degF")
+        return float(r.value.to("degF").magnitude)
+    except Exception:
+        return 0.0
 
 
 def get_fuel_level(connection: obd.OBD) -> float:
