@@ -1,18 +1,27 @@
 import os, sys, datetime
-from PyQt5.QtCore import QObject, QUrl, pyqtSignal, Qt, pyqtProperty, QTimer, pyqtSlot
+from PyQt5.QtCore import QObject, QUrl, pyqtSignal, Qt, pyqtProperty, QThread, QTimer, pyqtSlot
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtQuick import QQuickView
 import py_obd, obd
 from obd import commands, OBDStatus
 import serial, pynmea2
+import platform
 
 def get_serial_ports():
+    import platform
+    import os
+
     # More reliable check for Raspberry Pi
     is_pi = os.uname().machine.startswith("arm") or os.uname().machine.startswith("aarch")
 
-    gps_port = "/dev/ttyACM0"
+    # if is_pi:
+    gps_port = "/dev/ttyACM0"   # Double-check these with `ls /dev/tty*`
     obd_port = "/dev/rfcomm0"
     qml_file = "/home/kyle/ODB2-Guages/dashboard.qml"
+    # else:
+    #     gps_port = "COM5"
+    #     obd_port = "COM4"
+    #     qml_file = os.path.join(os.getcwd(), "dashboard.qml")
 
     print("[INFO] Detected Raspberry Pi:", is_pi)
     print("[INFO] GPS Port:", gps_port)
@@ -21,17 +30,18 @@ def get_serial_ports():
     return gps_port, obd_port, qml_file
 
 
+
 # — Helper Classes —
 
 def set_update_rate(port="/dev/ttyACM0", rate_ms=100):
     cmd = f"$PMTK220,{rate_ms}*"
+    # Compute checksum
     cs = 0
     for c in cmd[1:]:
         cs ^= ord(c)
     full = f"{cmd}{cs:02X}\r\n"
     with serial.Serial(port, 9600, timeout=1) as s:
         s.write(full.encode())
-
 
 class CheckEngine(QObject):
     milChanged = pyqtSignal()
@@ -44,13 +54,13 @@ class CheckEngine(QObject):
 
     @pyqtProperty(bool, notify=milChanged)
     def mil(self): return self._mil
-
+    
     @mil.setter
     def mil(self, v): self._mil = v; self.milChanged.emit()
 
     @pyqtProperty(int, notify=dtcCountChanged)
     def dtcCount(self): return self._dtc_count
-
+    
     @dtcCount.setter
     def dtcCount(self, v): self._dtc_count = v; self.dtcCountChanged.emit()
 
@@ -73,7 +83,7 @@ class GPSSpeedReader(QObject):
                 speed_knots = msg.spd_over_grnd or 0
                 speed_mph = speed_knots * 1.15078
                 self.speedUpdated.emit(round(speed_mph))
-        except Exception:
+        except:
             pass
 
 
@@ -88,7 +98,6 @@ class Speedometer(QObject):
 
     @pyqtProperty(float, notify=speedChanged)
     def currSpeed(self): return self._currSpeed
-
     @currSpeed.setter
     def currSpeed(self, v): self._currSpeed = v; self.speedChanged.emit()
 
@@ -97,7 +106,6 @@ class Speedometer(QObject):
 
     @pyqtProperty(float)
     def maxSpeed(self): return self._maxSpeed
-
     @pyqtProperty(float)
     def minSpeed(self): return self._minSpeed
 
@@ -113,13 +121,11 @@ class RPMMeter(QObject):
 
     @pyqtProperty(float, notify=RPMChanged)
     def currRPM(self): return self._currRPM
-
     @currRPM.setter
     def currRPM(self, v): self._currRPM = v; self.RPMChanged.emit()
 
     @pyqtProperty(float)
     def maxRPM(self): return self._maxRPM
-
     @pyqtProperty(float)
     def minRPM(self): return self._minRPM
 
@@ -135,13 +141,11 @@ class BarMeter(QObject):
 
     @pyqtProperty(float, notify=currValueChanged)
     def currValue(self): return self._currValue
-
     @currValue.setter
     def currValue(self, v): self._currValue = v; self.currValueChanged.emit()
 
     @pyqtProperty(float)
     def maxValue(self): return self._maxValue
-
     @pyqtProperty(float)
     def minValue(self): return self._minValue
 
@@ -152,10 +156,8 @@ class StringLabel(QObject):
     def __init__(self):
         super().__init__()
         self._currValue = ""
-
     @pyqtProperty(str, notify=currValueChanged)
     def currValue(self): return self._currValue
-
     @currValue.setter
     def currValue(self, v): self._currValue = v; self.currValueChanged.emit()
 
@@ -171,13 +173,11 @@ class CenterScreenWidget(QObject):
 
     @pyqtProperty(str, notify=currTimeChanged)
     def currTime(self): return self._currTime
-
     @currTime.setter
     def currTime(self, v): self._currTime = v; self.currTimeChanged.emit()
 
     @pyqtProperty(str, notify=currTimeChanged)
     def currDate(self): return self._currDate
-
     @currDate.setter
     def currDate(self, v): self._currDate = v; self.currTimeChanged.emit()
 
@@ -189,9 +189,8 @@ class CenterScreenWidget(QObject):
 
 # — Utility Functions —
 
-def make_connection(port: str) -> obd.OBD:
-    # VPW/Class2 tends to be more reliable with fast=False and a slightly longer timeout
-    return obd.OBD(portstr=port, fast=False, timeout=2)
+def make_connection():
+    return obd.OBD(portstr=obd_port, fast=False, timeout=2)
 
 
 # — Main Application —
@@ -204,18 +203,22 @@ if __name__ == "__main__":
 
     gps_port, obd_port, qml_file = get_serial_ports()
 
+    # This makes it full screen
+    # view.setFlags(Qt.FramelessWindowHint)
+    # view.showFullScreen()
+
     set_update_rate(gps_port, 100)
 
     # Instantiate
     temperature = BarMeter()
-    battery_capacity = BarMeter()       # now shows module voltage (V)
+    battery_capacity = BarMeter()
     speedometer = Speedometer()
     rpmmeter = RPMMeter()
     centerScreen = CenterScreenWidget()
     intakePressureLabel = BarMeter()
     intakeTempLabel = BarMeter()
     runtimeLabel = StringLabel()
-    fuelLevelLabel = BarMeter()         # now updated (%)
+    fuelLevelLabel = BarMeter()
     fuelTypeLabel = StringLabel()
     engineLoadLabel = BarMeter()
     throttlePosLabel = BarMeter()
@@ -225,6 +228,7 @@ if __name__ == "__main__":
     cel = CheckEngine()
     gps = GPSSpeedReader(gps_port)
     oilPressureLabel = BarMeter()
+
 
     # Expose to QML
     ctx = engine.rootContext()
@@ -246,81 +250,65 @@ if __name__ == "__main__":
     ctx.setContextProperty("checkEngine", cel)
     ctx.setContextProperty("oilPressureLabel", oilPressureLabel)
 
+
+    # view.setSource(QUrl.fromLocalFile("/home/kyle/ODB2-Guages/dashboard.qml"))
     view.setSource(QUrl.fromLocalFile(qml_file))
     view.show()
 
-    # Wire GPS -> Speedometer (connect ONCE)
+    # Connect to OBD
+    connection = make_connection()
+    print("OBD status:", connection.status())
+    py_obd.get_supported_pids_mode01(connection)
+    py_obd.get_supported_pids_mode06(connection)
+
+    # Wire GPS -> Speedometer
     gps.speedUpdated.connect(speedometer.updateSpeed)
 
-    # Connect to OBD
-    connection = make_connection(obd_port)
-    print("OBD status:", connection.status())
-
-    # Only attempt PID discovery if connected (and never let it crash the UI)
-    if connection.status() == OBDStatus.CAR_CONNECTED:
-        try:
-            py_obd.get_supported_pids_mode01(connection)
-            py_obd.get_supported_pids_mode06(connection)
-        except Exception as e:
-            print("[WARN] PID discovery failed:", e)
-
-    last_reconnect = 0.0
-
-    def set_disconnected_values():
-        rpmmeter.currRPM = 0
-        temperature.currValue = 0
-        battery_capacity.currValue = 0
-        engineLoadLabel.currValue = 0
-        throttlePosLabel.currValue = 0
-        barometricPressureLabel.currValue = 0
-        intakeTempLabel.currValue = 0
-        intakePressureLabel.currValue = 0
-        absoluteLoadLabel.currValue = 0
-        fuelLevelLabel.currValue = 0
-        oilPressureLabel.currValue = 0
-        # Show "disconnected" by turning MIL on (optional)
-        cel.mil = True
-        cel.dtcCount = 0
-
     def update_all():
-        nonlocal last_reconnect
-        nonlocal connection
+        global connection
 
         centerScreen.update_now()
 
-        # If not connected, try to reconnect (rate-limited)
+        # If not connected, try to reconnect
         if connection.status() != OBDStatus.CAR_CONNECTED:
-            now = datetime.datetime.now().timestamp()
-            if now - last_reconnect > 2.0:
-                last_reconnect = now
-                try:
-                    connection.close()
-                except Exception:
-                    pass
-                connection = make_connection(obd_port)
-                print("OBD status:", connection.status())
+            try:
+                connection.close()
+            except:
+                pass
+            connection = make_connection()
+            print("OBD status:", connection.status())
 
-            set_disconnected_values()
-            return
+        # Only query if connected
+        if connection.status() == OBDStatus.CAR_CONNECTED:
+            resp = connection.query(commands.STATUS)
+            if resp and resp.value:
+                cel.mil = bool(resp.value.MIL)
+                cel.dtcCount = int(resp.value.DTC_count)
 
-        # Connected: pull values
-        resp = connection.query(commands.STATUS)
-        if resp and resp.value:
-            cel.mil = bool(resp.value.MIL)
-            cel.dtcCount = int(resp.value.DTC_count)
+            rpmmeter.currRPM = (py_obd.get_rpm(connection) or 0) / 1000
+            temperature.currValue = py_obd.get_temperature(connection) or 0
+            battery_capacity.currValue = py_obd.get_battery(connection) or 0
+            engineLoadLabel.currValue = py_obd.get_engine_load(connection) or 0
+            throttlePosLabel.currValue = py_obd.get_throttle_pos(connection) or 0
+            barometricPressureLabel.currValue = py_obd.get_intake_pressure(connection) or 0
+            intakeTempLabel.currValue = py_obd.get_intake_temp(connection) or 0
+            absoluteLoadLabel.currValue = py_obd.get_absolute_load(connection) or 0
+            oilPressureLabel.currValue = py_obd.get_oil_pressure(connection) or 0
 
-        # RPM in thousands for your gauge
-        rpmmeter.currRPM = (py_obd.get_rpm(connection) or 0) / 1000
-        temperature.currValue = py_obd.get_temperature(connection) or 0
-        battery_capacity.currValue = py_obd.get_battery_voltage(connection) or 0
-        engineLoadLabel.currValue = py_obd.get_engine_load(connection) or 0
-        throttlePosLabel.currValue = py_obd.get_throttle_pos(connection) or 0
-        barometricPressureLabel.currValue = py_obd.get_barometric_pressure(connection) or 0
-        intakePressureLabel.currValue = py_obd.get_intake_pressure(connection) or 0
-        intakeTempLabel.currValue = py_obd.get_intake_temp(connection) or 0
-        absoluteLoadLabel.currValue = py_obd.get_absolute_load(connection) or 0
-        fuelLevelLabel.currValue = py_obd.get_fuel_level(connection) or 0
-        oilPressureLabel.currValue = py_obd.get_oil_pressure(connection) or 0
+        else:
+            # Reset values if disconnected
+            rpmmeter.currRPM = 0
+            temperature.currValue = 0
+            battery_capacity.currValue = 0
+            engineLoadLabel.currValue = 0
+            throttlePosLabel.currValue = 0
+            barometricPressureLabel.currValue = 0
+            intakeTempLabel.currValue = 0
+            absoluteLoadLabel.currValue = 0
+            cel.mil = True
+            cel.dtcCount = 10
+            oilPressureLabel.currValue = 0
+
 
     poll_timer = QTimer()
     poll_timer.timeout.connect(update_all)

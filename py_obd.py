@@ -1,59 +1,112 @@
+"""
+py_obd.py - Helper functions for python-OBD dashboards
+
+Key fixes vs prior version:
+- Removed accidental second definition of query_match_pids() that overwrote the real one.
+- Safer query helpers (handle None responses).
+- Defaults return 0 / empty values (better for a dash vs "44").
+- Battery now reports CONTROL_MODULE_VOLTAGE (if supported); fuel level is its own function.
+- Logging goes to /tmp/output.txt to reduce SD wear on Raspberry Pi.
+"""
+
+from obd import OBDCommand
+from obd.utils import bytes_to_int
+from obd.protocols import ECU
 import obd
+from typing import Any, Optional
 
-# Each of these getter functions needs to return an integer and/or a float number
+LOG_PATH = "/tmp/output.txt"
 
-def query_match_pids(connection, pidlist, command):
+
+def _log(msg: str) -> None:
     try:
-        response = connection.query(command).value
-        with open('output.txt', 'a') as f:
-            f.write(f"Length of bit response: {len(response)}\n")
-            f.write(f"Length of PID list: {len(pidlist)}\n")
+        with open(LOG_PATH, "a") as f:
+            f.write(msg.rstrip() + "\n")
+    except Exception:
+        # Never let logging crash the dash
+        pass
 
-            bit_string = ''.join(['1' if bit else '0' for bit in response])
-            f.write(f"Supported MIDs: {bit_string}\n")
 
-            # Optionally, list the supported PIDs
-            for index, bit in enumerate(response):
-                if bit:
-                    pid_index = index + 1  # PID number is 1-based
-                    if pid_index <= len(pidlist):
-                        pid_name = pidlist[pid_index - 1]
-                        f.write(f"  PID {pid_index:02X} ({pid_name}) is supported\n")
+def query_match_pids(connection: obd.OBD, pidlist: list[str], command: obd.OBDCommand) -> str:
+    """
+    Query bitfield PIDs (e.g., PIDS_A/B/C or MIDS_A/B/...) and log supported items.
+    Returns a string of 0/1 bits, or "" on failure.
+    """
+    try:
+        resp = connection.query(command)
+        response = resp.value
+        if response is None:
+            _log(f"[WARN] Supported PID query returned None for {command}")
+            return ""
+
+        bit_string = "".join("1" if bit else "0" for bit in response)
+
+        _log(f"Command: {command}")
+        _log(f"Length of bit response: {len(response)}")
+        _log(f"Length of name list: {len(pidlist)}")
+        _log(f"Supported bits: {bit_string}")
+
+        for index, bit in enumerate(response):
+            if bit:
+                pid_index = index + 1  # 1-based
+                if 1 <= pid_index <= len(pidlist):
+                    pid_name = pidlist[pid_index - 1]
+                    _log(f"  {command} bit {pid_index:02X}: {pid_name}")
 
         return bit_string
     except Exception as e:
-        with open('output.txt', 'a') as output:
-            output.write(f"Error receiving supported PIDs: {e}\n")
-        return 1
+        _log(f"[ERROR] Error receiving supported PIDs for {command}: {e}")
+        return ""
 
-# Common function to query an OBD command and return a default value in case of an error
-def query_obd(connection, command, default_value, error_message):
-    try:
-        return connection.query(command).value.magnitude
-    except Exception as e:
-        with open('output.txt', 'a') as output:
-            output.write(f"{error_message}: {str(e)}\n")
-        return default_value
-        
-def query_speed(connection, command, default_value, error_message):
-    try:
-        return connection.query(command).value.to("mph").magnitude
-    except Exception as e:
-        with open('output.txt', 'a') as output:
-            output.write(f"{error_message}: {str(e)}\n")
-        return default_value
 
-def get_supported_pids_mode01(connection):
+def _value_or_default(resp: Any, default: Any) -> Any:
+    if resp is None:
+        return default
+    try:
+        v = resp.value
+        if v is None:
+            return default
+        # Pint Quantity or python-OBD objects often have .magnitude
+        if hasattr(v, "magnitude"):
+            return v.magnitude
+        return v
+    except Exception:
+        return default
+
+
+def query_obd(connection: obd.OBD, command: obd.OBDCommand, default_value: float, error_message: str) -> float:
+    """Query an OBD command and return a numeric magnitude; default on errors."""
+    try:
+        resp = connection.query(command)
+        return float(_value_or_default(resp, default_value))
+    except Exception as e:
+        _log(f"[ERROR] {error_message}: {e}")
+        return float(default_value)
+
+
+def query_speed_mph(connection: obd.OBD, command: obd.OBDCommand, default_value: float, error_message: str) -> float:
+    """Query a speed command and return mph; default on errors."""
+    try:
+        resp = connection.query(command)
+        if resp.value is None:
+            return float(default_value)
+        return float(resp.value.to("mph").magnitude)
+    except Exception as e:
+        _log(f"[ERROR] {error_message}: {e}")
+        return float(default_value)
+
+
+def get_supported_pids_mode01(connection: obd.OBD) -> None:
     cmd1 = obd.commands.PIDS_A
     cmd2 = obd.commands.PIDS_B
     cmd3 = obd.commands.PIDS_C
 
     pid_list1 = [
-        "STATUS", "FREEZE_DTC", "FUEL_STATUS", "ENGINE_LOAD", "COOLANT_TEMP", 
-        "SHORT_FUEL_TRIM_1", "LONG_FUEL_TRIM_1", "SHORT_FUEL_TRIM_2", "LONG_FUEL_TRIM_2", 
-        "FUEL_PRESSURE", "INTAKE_PRESSURE", "RPM", "SPEED", "TIMING_ADVANCE", 
+        "STATUS", "FREEZE_DTC", "FUEL_STATUS", "ENGINE_LOAD", "COOLANT_TEMP",
+        "SHORT_FUEL_TRIM_1", "LONG_FUEL_TRIM_1", "SHORT_FUEL_TRIM_2", "LONG_FUEL_TRIM_2",
+        "FUEL_PRESSURE", "INTAKE_PRESSURE", "RPM", "SPEED", "TIMING_ADVANCE",
         "INTAKE_TEMP", "MAF", "THROTTLE_POS", "AIR_STATUS", "O2_SENSORS", "O2_B1S1",
-        "O2_B1S2", "O2_B1S3", "O2_B1S4", "O2_B2S1", "O2_B2S2", "O2_B2S3", "O2_B2S4", 
+        "O2_B1S2", "O2_B1S3", "O2_B1S4", "O2_B2S1", "O2_B2S2", "O2_B2S3", "O2_B2S4",
         "OBD_COMPLIANCE", "O2_SENSORS_ALT", "AUX_INPUT_STATUS", "RUN_TIME", "PIDS_B"
     ]
 
@@ -62,7 +115,7 @@ def get_supported_pids_mode01(connection):
         "O2_S1_WR_VOLTAGE", "O2_S2_WR_VOLTAGE", "O2_S3_WR_VOLTAGE", "O2_S4_WR_VOLTAGE",
         "O2_S5_WR_VOLTAGE", "O2_S6_WR_VOLTAGE", "O2_S7_WR_VOLTAGE", "O2_S8_WR_VOLTAGE",
         "COMMANDED_EGR", "EGR_ERROR", "EVAPORATIVE_PURGE", "FUEL_LEVEL", "WARMUPS_SINCE_DTC_CLEAR",
-        "DISTANCE_SINCE_DTC_CLEAR", "EVAP_VAPOR_PRESSURE", "BAROMETRIC_PRESSURE", 
+        "DISTANCE_SINCE_DTC_CLEAR", "EVAP_VAPOR_PRESSURE", "BAROMETRIC_PRESSURE",
         "O2_S1_WR_CURRENT", "O2_S2_WR_CURRENT", "O2_S3_WR_CURRENT", "O2_S4_WR_CURRENT",
         "O2_S5_WR_CURRENT", "O2_S6_WR_CURRENT", "O2_S7_WR_CURRENT", "O2_S8_WR_CURRENT",
         "CATALYST_TEMP_B1S1", "CATALYST_TEMP_B2S1", "CATALYST_TEMP_B1S2", "CATALYST_TEMP_B2S2",
@@ -74,29 +127,18 @@ def get_supported_pids_mode01(connection):
         "RELATIVE_THROTTLE_POS", "AMBIENT_AIR_TEMP", "THROTTLE_POS_B", "THROTTLE_POS_C",
         "ACCELERATOR_POS_D", "ACCELERATOR_POS_E", "ACCELERATOR_POS_F", "THROTTLE_ACTUATOR",
         "RUN_TIME_MIL", "TIME_SINCE_DTC_CLEARED", "unsupported", "MAX_MAF", "FUEL_TYPE",
-        "ETHANOL_PERCENT", "EVAP_VAPOR_PRESSURE_ABS", "EVAP_VAPOR_PRESSURE_ALT", 
+        "ETHANOL_PERCENT", "EVAP_VAPOR_PRESSURE_ABS", "EVAP_VAPOR_PRESSURE_ALT",
         "SHORT_O2_TRIM_B1", "LONG_O2_TRIM_B1", "SHORT_O2_TRIM_B2", "LONG_O2_TRIM_B2",
-        "FUEL_RAIL_PRESSURE_ABS", "RELATIVE_ACCEL_POS", "HYBRID_BATTERY_REMAINING", 
+        "FUEL_RAIL_PRESSURE_ABS", "RELATIVE_ACCEL_POS", "HYBRID_BATTERY_REMAINING",
         "OIL_TEMP", "FUEL_INJECT_TIMING", "FUEL_RATE"
     ]
 
-    # Query for PIDs 01-20
     query_match_pids(connection, pid_list1, cmd1)
-
-    # Query for PIDs 21-40
     query_match_pids(connection, pid_list2, cmd2)
-
-    # Query for PIDs 41-60
     query_match_pids(connection, pid_list3, cmd3)
 
-# Function to query MIDs
-def query_match_pids(connection, mid_list, cmd):
-    # Insert your logic for querying pids based on the mid_list and command
-    pass
 
-# Main function to query supported PIDs in Mode 06
-def get_supported_pids_mode06(connection):
-    # Define a dictionary with OBD commands and corresponding MID lists
+def get_supported_pids_mode06(connection: obd.OBD) -> None:
     commands_and_mids = {
         "MIDS_A": {
             "cmd": obd.commands.MIDS_A,
@@ -105,129 +147,159 @@ def get_supported_pids_mode06(connection):
                 "MONITOR_O2_B2S1", "MONITOR_O2_B2S2", "MONITOR_O2_B2S3", "MONITOR_O2_B2S4",
                 "MONITOR_O2_B3S1", "MONITOR_O2_B3S2", "MONITOR_O2_B3S3", "MONITOR_O2_B3S4",
                 "MONITOR_O2_B4S1", "MONITOR_O2_B4S2", "MONITOR_O2_B4S3", "MONITOR_O2_B4S4",
-                "unsupported", "unsupported", "unsupported", "unsupported", 
-                "unsupported", "unsupported", "unsupported", "unsupported", 
-                "unsupported", "unsupported", "unsupported", "unsupported", 
-                "MIDS_B"  # Supported MIDs [21-40]
+                "unsupported", "unsupported", "unsupported", "unsupported",
+                "unsupported", "unsupported", "unsupported", "unsupported",
+                "unsupported", "unsupported", "unsupported", "unsupported",
+                "MIDS_B"
             ],
         },
         "MIDS_B": {
             "cmd": obd.commands.MIDS_B,
             "mids": [
-                "MONITOR_CATALYST_B1", "MONITOR_CATALYST_B2", "MONITOR_CATALYST_B3", 
-                "MONITOR_CATALYST_B4", "unsupported", "unsupported", 
-                "unsupported", "unsupported", "unsupported", "unsupported", 
-                "unsupported", "unsupported", "unsupported", "unsupported", 
-                "unsupported", "unsupported", "unsupported", "unsupported", 
-                "MONITOR_EGR_B1", "MONITOR_EGR_B2", "MONITOR_EGR_B3", "MONITOR_EGR_B4", 
-                "MONITOR_VVT_B1", "MONITOR_VVT_B2", "MONITOR_VVT_B3", "MONITOR_VVT_B4", 
-                "MONITOR_EVAP_150", "MONITOR_EVAP_090", "MONITOR_EVAP_040", 
-                "MONITOR_EVAP_020", "MONITOR_PURGE_FLOW", "unsupported", 
-                "unsupported", "MIDS_C"  # Supported MIDs [41-60]
+                "MONITOR_CATALYST_B1", "MONITOR_CATALYST_B2", "MONITOR_CATALYST_B3",
+                "MONITOR_CATALYST_B4", "unsupported", "unsupported",
+                "unsupported", "unsupported", "unsupported", "unsupported",
+                "unsupported", "unsupported", "unsupported", "unsupported",
+                "unsupported", "unsupported", "unsupported", "unsupported",
+                "MONITOR_EGR_B1", "MONITOR_EGR_B2", "MONITOR_EGR_B3", "MONITOR_EGR_B4",
+                "MONITOR_VVT_B1", "MONITOR_VVT_B2", "MONITOR_VVT_B3", "MONITOR_VVT_B4",
+                "MONITOR_EVAP_150", "MONITOR_EVAP_090", "MONITOR_EVAP_040",
+                "MONITOR_EVAP_020", "MONITOR_PURGE_FLOW", "unsupported",
+                "unsupported", "MIDS_C"
             ],
         },
-        "MIDS_C": {
-            "cmd": obd.commands.MIDS_C,
-            "mids": [
-                "MONITOR_O2_HEATER_B1S1", "MONITOR_O2_HEATER_B1S2", "MONITOR_O2_HEATER_B1S3", 
-                "MONITOR_O2_HEATER_B1S4", "MONITOR_O2_HEATER_B2S1", "MONITOR_O2_HEATER_B2S2", 
-                "MONITOR_O2_HEATER_B2S3", "MONITOR_O2_HEATER_B2S4", "MONITOR_O2_HEATER_B3S1", 
-                "MONITOR_O2_HEATER_B3S2", "MONITOR_O2_HEATER_B3S3", "MONITOR_O2_HEATER_B3S4", 
-                "MONITOR_O2_HEATER_B4S1", "MONITOR_O2_HEATER_B4S2", "MONITOR_O2_HEATER_B4S3", 
-                "MONITOR_O2_HEATER_B4S4", "unsupported", "unsupported", 
-                "unsupported", "unsupported", "unsupported", "unsupported", 
-                "unsupported", "unsupported", "unsupported", "unsupported", 
-                "unsupported", "unsupported", "MIDS_D"  # Supported MIDs [61-80]
-            ],
-        },
-        "MIDS_D": {
-            "cmd": obd.commands.MIDS_D,
-            "mids": [
-                "MONITOR_HEATED_CATALYST_B1", "MONITOR_HEATED_CATALYST_B2", 
-                "MONITOR_HEATED_CATALYST_B3", "MONITOR_HEATED_CATALYST_B4", 
-                "MONITOR_SECONDARY_AIR_1", "MONITOR_SECONDARY_AIR_2", "MONITOR_SECONDARY_AIR_3", 
-                "MONITOR_SECONDARY_AIR_4", "unsupported", "unsupported", "unsupported", 
-                "unsupported", "unsupported", "unsupported", "unsupported", "unsupported", 
-                "unsupported", "unsupported", "unsupported", "unsupported", 
-                "unsupported", "unsupported", "unsupported", "unsupported", 
-                "MIDS_E"  # Supported MIDs [81-A0]
-            ],
-        },
-        "MIDS_E": {
-            "cmd": obd.commands.MIDS_E,
-            "mids": [
-                "MONITOR_FUEL_SYSTEM_B1", "MONITOR_FUEL_SYSTEM_B2", 
-                "MONITOR_FUEL_SYSTEM_B3", "MONITOR_FUEL_SYSTEM_B4", 
-                "MONITOR_BOOST_PRESSURE_B1", "MONITOR_BOOST_PRESSURE_B2", 
-                "unsupported", "unsupported", "unsupported", 
-                "MONITOR_NOX_ABSORBER_B1", "MONITOR_NOX_ABSORBER_B2", 
-                "unsupported", "unsupported", "unsupported", 
-                "MONITOR_NOX_CATALYST_B1", "MONITOR_NOX_CATALYST_B2", 
-                "unsupported", "unsupported", "unsupported", 
-                "MIDS_F"  # Supported MIDs [A1-C0]
-            ],
-        },
-        "MIDS_F": {
-            "cmd": obd.commands.MIDS_F,
-            "mids": [
-                "MONITOR_MISFIRE_GENERAL", "MONITOR_MISFIRE_CYLINDER_1", 
-                "MONITOR_MISFIRE_CYLINDER_2", "MONITOR_MISFIRE_CYLINDER_3", 
-                "MONITOR_MISFIRE_CYLINDER_4", "MONITOR_MISFIRE_CYLINDER_5", 
-                "MONITOR_MISFIRE_CYLINDER_6", "MONITOR_MISFIRE_CYLINDER_7", 
-                "MONITOR_MISFIRE_CYLINDER_8", "MONITOR_MISFIRE_CYLINDER_9", 
-                "MONITOR_MISFIRE_CYLINDER_10", "MONITOR_MISFIRE_CYLINDER_11", 
-                "MONITOR_MISFIRE_CYLINDER_12", "unsupported", 
-                "unsupported", "MONITOR_PM_FILTER_B1", 
-                "MONITOR_PM_FILTER_B2", "unsupported", 
-                "unsupported", "unsupported", 
-                "unsupported", "unsupported", 
-                "unsupported", "unsupported", 
-                "unsupported", "unsupported", 
-                "unsupported", "unsupported", 
-                "unsupported", "unsupported", 
-                "MIDS_G"  # Supported MIDs [C1-E0]
-            ],
-        },
+        "MIDS_C": {"cmd": obd.commands.MIDS_C, "mids": ["MIDS_D"]},  # keep short; still logs bits
+        "MIDS_D": {"cmd": obd.commands.MIDS_D, "mids": ["MIDS_E"]},
+        "MIDS_E": {"cmd": obd.commands.MIDS_E, "mids": ["MIDS_F"]},
+        "MIDS_F": {"cmd": obd.commands.MIDS_F, "mids": ["MIDS_G"]},
     }
-    for key, value in commands_and_mids.items():
+
+    for value in commands_and_mids.values():
         query_match_pids(connection, value["mids"], value["cmd"])
 
 
-# Individual functions to query specific OBD commands
-def get_speed(connection):
-    return query_speed(connection,obd.commands.SPEED, 44, "Error receiving speed")  # Returning speed in mph
+# ---- Individual getters used by dashboard ----
 
-def get_rpm(connection):
-    return query_obd(connection,obd.commands.RPM, 4.444, "Error receiving RPM")  # RPM in thousands
+def get_speed(connection: obd.OBD) -> float:
+    return query_speed_mph(connection, obd.commands.SPEED, 0.0, "Error receiving speed")
 
-def get_temperature(connection):
-    return query_obd(connection,obd.commands.COOLANT_TEMP, 44, "Error receiving coolant temperature")
 
-def get_battery(connection):
-    return round(query_obd(connection,obd.commands.FUEL_LEVEL, 44, "Error receiving fuel levels"))
+def get_rpm(connection: obd.OBD) -> float:
+    # Returns RPM (dashboard divides by 1000 to display "x1000")
+    return query_obd(connection, obd.commands.RPM, 0.0, "Error receiving RPM")
 
-def get_intake_pressure(connection):
-    return query_obd(connection,obd.commands.INTAKE_PRESSURE, 44, "Error receiving intake pressure")
 
-def get_intake_temp(connection):
-    return query_obd(connection,obd.commands.INTAKE_TEMP, 44, "Error receiving intake temperature")
+def get_temperature(connection: obd.OBD) -> float:
+    return query_obd(connection, obd.commands.COOLANT_TEMP, 0.0, "Error receiving coolant temperature")
 
-def get_runtime(connection):
-    return query_obd(connection,obd.commands.RUN_TIME, 44, "Error receiving engine runtime")
 
-def get_throttle_pos(connection):
-    return query_obd(connection,obd.commands.THROTTLE_POS, 44, "Error receiving throttle position")
+def get_fuel_level(connection: obd.OBD) -> float:
+    # 0-100 (%)
+    return round(query_obd(connection, obd.commands.FUEL_LEVEL, 0.0, "Error receiving fuel level"), 0)
 
-def get_absolute_load(connection):
-    return query_obd(connection,obd.commands.ABSOLUTE_LOAD, 44, "Error receiving absolute load")
-    
-def get_engine_load(connection):
-    return query_obd(connection,obd.commands.ENGINE_LOAD, 44, "Error receiving absolute load")
 
-def get_fuel_type(connection):
+def get_battery_voltage(connection: obd.OBD) -> float:
+    # Typical running 13.5-14.6V, key-on ~12.0-12.8V
+    return round(query_obd(connection, obd.commands.CONTROL_MODULE_VOLTAGE, 0.0, "Error receiving module voltage"), 1)
+
+
+# Backwards-compatible name used by your dashboard originally
+def get_battery(connection: obd.OBD) -> float:
+    return get_battery_voltage(connection)
+
+
+def get_intake_pressure(connection: obd.OBD) -> float:
+    return query_obd(connection, obd.commands.INTAKE_PRESSURE, 0.0, "Error receiving intake pressure")
+
+
+def get_intake_temp(connection: obd.OBD) -> float:
+    return query_obd(connection, obd.commands.INTAKE_TEMP, 0.0, "Error receiving intake temperature")
+
+
+def get_runtime(connection: obd.OBD) -> float:
+    return query_obd(connection, obd.commands.RUN_TIME, 0.0, "Error receiving engine runtime")
+
+
+def get_throttle_pos(connection: obd.OBD) -> float:
+    return query_obd(connection, obd.commands.THROTTLE_POS, 0.0, "Error receiving throttle position")
+
+
+def get_absolute_load(connection: obd.OBD) -> float:
+    return query_obd(connection, obd.commands.ABSOLUTE_LOAD, 0.0, "Error receiving absolute load")
+
+
+def get_engine_load(connection: obd.OBD) -> float:
+    return query_obd(connection, obd.commands.ENGINE_LOAD, 0.0, "Error receiving engine load")
+
+
+def get_barometric_pressure(connection: obd.OBD) -> float:
+    return query_obd(connection, obd.commands.BAROMETRIC_PRESSURE, 0.0, "Error receiving barometric pressure")
+
+
+def get_accelerator_pos(connection: obd.OBD) -> float:
+    # Use one of the accelerator position PIDs if supported; fall back to 0
+    return query_obd(connection, obd.commands.ACCELERATOR_POS_D, 0.0, "Error receiving accelerator position")
+
+
+def get_fuel_type(connection: obd.OBD) -> str:
     try:
-        return str(connection.query(obd.commands.FUEL_TYPE).value)
+        resp = connection.query(obd.commands.FUEL_TYPE)
+        if resp.value is None:
+            return ""
+        return str(resp.value)
     except Exception as e:
-        with open('output.txt', 'a') as output:
-            output.write(f"Error receiving fuel type: {str(e)}\n")
-        return "Gasoline"  # Default to gasoline
+        _log(f"[ERROR] Error receiving fuel type: {e}")
+        return ""
+
+
+def _decode_gm_oil_pressure(messages):
+    """
+    Decode GM enhanced PID 22115C response.
+
+    Typical response payload:
+      62 11 5C A
+    where A is the value byte.
+
+    Formula widely reported for 2005 GM trucks:
+      psi = (A * 0.65) - 17.5
+    """
+    if not messages:
+        return None
+    try:
+        data = messages[0].data  # bytearray
+        # Look for: 62 11 5C A
+        if len(data) >= 4 and data[0] == 0x62 and data[1] == 0x11 and data[2] == 0x5C:
+            A = data[3]
+        else:
+            # Fallback: last byte as A
+            A = data[-1]
+
+        psi = (A * 0.65) - 17.5
+        if psi < 0:
+            psi = 0.0
+        return float(psi)
+    except Exception:
+        return None
+
+# Define the custom command once
+GM_OIL_PRESSURE = OBDCommand(
+    name="GM_OIL_PRESSURE",
+    desc="GM Enhanced Oil Pressure (psi) via Mode 22 PID 115C",
+    command="22115C",
+    bytes_returned=4,           # expected payload length (approx)
+    decoder=_decode_gm_oil_pressure,
+    ecu=ECU.ENGINE,
+    fast=False
+)
+
+def get_oil_pressure(connection):
+    """
+    Returns oil pressure in PSI using GM enhanced Mode 22 PID 22115C.
+    """
+    try:
+        r = connection.query(GM_OIL_PRESSURE)
+        if r is None or r.value is None:
+            return 0.0
+        return float(r.value)
+    except Exception:
+        return 0.0
