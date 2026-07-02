@@ -292,18 +292,12 @@ if __name__ == "__main__":
     view.setSource(QUrl.fromLocalFile(qml_file))
     view.show()
 
-    # Connect to OBD
-    connection = make_connection(obd_port)
-    report_obd_status(connection)
-
-    # Only attempt PID discovery if connected (and never let it crash the UI)
-    if obd_connected(connection):
-        try:
-            py_obd.get_supported_pids_mode01(connection)
-            py_obd.get_supported_pids_mode06(connection)
-        except Exception as e:
-            print("[WARN] PID discovery failed:", e)
-
+    # ---- OBD via python-OBD Async ----
+    # obd.Async runs a background thread that continuously polls the watched
+    # commands and fires our callbacks with fresh values, so the Qt UI never
+    # blocks on a serial round-trip. The callbacks run on that worker thread;
+    # they only set QObject properties, whose notify signals Qt delivers to the
+    # GUI thread via a queued connection (safe cross-thread).
     last_reconnect = 0.0
 
     def set_disconnected_values():
@@ -323,69 +317,90 @@ if __name__ == "__main__":
         cel.mil = True
         cel.dtcCount = 0
 
-    def _update_status():
-        resp = connection.query(commands.STATUS)
-        if resp and resp.value:
-            cel.mil = bool(resp.value.MIL)
-            cel.dtcCount = int(resp.value.DTC_count)
+    # --- Async callbacks (invoked on the OBD worker thread) ---
+    def on_rpm(r):
+        v = r.value
+        rpmmeter.currRPM = float(v.magnitude) if v is not None else 0
 
-    # Slow-changing readouts: one is refreshed per tick (round-robin) so the
-    # primary gauges (speed & RPM) aren't stuck waiting on ~13 serial
-    # round-trips every cycle. Each entry is (target_obj, attr, getter).
-    slow_updates = [
-        (None, None, _update_status),   # MIL / DTC count
-        (temperature, "currValue", py_obd.get_temperature),
-        (battery_capacity, "currValue", py_obd.get_battery_voltage),
-        (engineLoadLabel, "currValue", py_obd.get_engine_load),
-        (throttlePosLabel, "currValue", py_obd.get_throttle_pos),
-        (barometricPressureLabel, "currValue", py_obd.get_barometric_pressure),
-        (intakePressureLabel, "currValue", py_obd.get_intake_pressure),
-        (intakeTempLabel, "currValue", py_obd.get_intake_temp),
-        (absoluteLoadLabel, "currValue", py_obd.get_absolute_load),
-        (fuelLevelLabel, "currValue", py_obd.get_fuel_level),
-        (oilPressureLabel, "currValue", py_obd.get_oil_pressure),
+    def on_speed(r):
+        v = r.value
+        speedometer.currSpeed = float(v.to("mph").magnitude) if v is not None else 0
+
+    def on_temp(r):
+        v = r.value
+        temperature.currValue = round(float(v.to("degF").magnitude), 1) if v is not None else 0
+
+    def on_status(r):
+        v = r.value
+        if v is not None:
+            cel.mil = bool(v.MIL)
+            cel.dtcCount = int(v.DTC_count)
+
+    # Only the gauges actually shown in the QML are watched, so the background
+    # loop cycles as fast as possible. If you restore a gauge to the UI, add its
+    # command + callback here so it gets polled again.
+    WATCHED = [
+        (commands.RPM, on_rpm),
+        (commands.SPEED, on_speed),
+        (commands.COOLANT_TEMP, on_temp),
+        (commands.STATUS, on_status),
     ]
-    slow_index = 0
 
-    def update_all():
-        global last_reconnect, connection, slow_index
+    def start_async():
+        """Build an Async connection; watch commands + start the loop if the car is up."""
+        try:
+            conn = obd.Async(portstr=obd_port, fast=False, timeout=2)
+        except Exception as e:
+            print("[WARN] Could not open Async OBD connection:", e)
+            return None
+        report_obd_status(conn)
+        if conn.status() == OBDStatus.CAR_CONNECTED:
+            try:
+                py_obd.get_supported_pids_mode01(conn)
+                py_obd.get_supported_pids_mode06(conn)
+            except Exception as e:
+                print("[WARN] PID discovery failed:", e)
+            for cmd, cb in WATCHED:
+                conn.watch(cmd, callback=cb)
+            conn.start()
+        return conn
+
+    def stop_async(conn):
+        if conn is None:
+            return
+        try:
+            conn.stop()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    # Connect to OBD and start the background polling loop.
+    connection = start_async()
+
+    def tick():
+        """Main-thread heartbeat: update the clock and manage (re)connection.
+        Live gauge data is pushed by the Async callbacks, not from here."""
+        global last_reconnect, connection
 
         centerScreen.update_now()
 
-        # If not connected, try to reconnect (rate-limited)
+        # If not connected, show zeros and try to reconnect (rate-limited).
         if not obd_connected(connection):
             now = datetime.datetime.now().timestamp()
             if now - last_reconnect > 2.0:
                 last_reconnect = now
-                try:
-                    if connection:
-                        connection.close()
-                except Exception:
-                    pass
-                connection = make_connection(obd_port)
-                report_obd_status(connection)
-
+                stop_async(connection)
+                connection = start_async()
             set_disconnected_values()
-            return
 
-        # Fast path: refresh the two primary gauges every tick.
-        # True RPM straight from the ECU (no scaling).
-        rpmmeter.currRPM = py_obd.get_rpm(connection) or 0
-        # Vehicle speed (mph) from the PCM instead of GPS.
-        speedometer.currSpeed = py_obd.get_speed(connection) or 0
+    # Cleanly stop the worker thread when the app quits.
+    app.aboutToQuit.connect(lambda: stop_async(connection))
 
-        # Slow path: refresh exactly one secondary readout this tick.
-        obj, attr, getter = slow_updates[slow_index]
-        if obj is None:
-            getter()
-        else:
-            setattr(obj, attr, getter(connection) or 0)
-        slow_index = (slow_index + 1) % len(slow_updates)
-
-    poll_timer = QTimer()
-    poll_timer.timeout.connect(update_all)
-    # 50 ms floor; on real hardware the OBD round-trips govern the actual rate,
-    # this just removes idle gap between cycles so gauges refresh as fast as the bus allows.
-    poll_timer.start(50)
+    clock_timer = QTimer()
+    clock_timer.timeout.connect(tick)
+    clock_timer.start(250)
 
     sys.exit(app.exec_())
