@@ -9,13 +9,18 @@ Key fixes vs prior version:
 - Logging goes to /tmp/output.txt to reduce SD wear on Raspberry Pi.
 """
 
+import os
+import tempfile
 from obd import OBDCommand
 from obd.utils import bytes_to_int
 from obd.protocols import ECU
 import obd
 from typing import Any, Optional
 
-LOG_PATH = "/tmp/output.txt"
+# On the Pi we log to /tmp to reduce SD wear; elsewhere fall back to the
+# OS temp dir so this imports/runs on Windows and macOS too.
+_default_log = "/tmp/output.txt" if os.path.isdir("/tmp") else os.path.join(tempfile.gettempdir(), "output.txt")
+LOG_PATH = os.environ.get("OBD_LOG", _default_log)
 
 
 def _log(msg: str) -> None:

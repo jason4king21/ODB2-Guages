@@ -30,24 +30,17 @@ Rectangle {
     CenterScreenWidget {
         anchors {
             horizontalCenter: parent.horizontalCenter
-            top: label3.bottom
-        }
-    }
-
-    To60Widget {
-        anchors {
-            horizontalCenter: parent.horizontalCenter
-            bottom: parent.bottom
-            bottomMargin: 100
+            top: parent.top
+            topMargin: 0
         }
     }
 
     SpeedometerGauge {
-        scale: 1.3
+        scale: 1.5
         anchors {
             top: parent.top
             right: parent.right
-            rightMargin: 75
+            rightMargin: 130
             bottom: parent.bottom
         }
     }
@@ -94,20 +87,6 @@ Rectangle {
     //    anchors.rightMargin: 10
     //    anchors.verticalCenter: label3.verticalCenter
     //}
-
-    StringLabels {
-        id: label3
-        label: "Run Time"
-        currValue: runtimeLabel.currValue
-        fontSize: 18
-        color: "white"
-        borderColor: "#FF0000" // Example border color
-        borderWidth: 2 // Example border width
-        borderRadius: 10 // Example border radius for rounded corners
-        anchors.top: parent.top
-        anchors.topMargin: 10
-        anchors.right: parent.horizontalCenter
-    }
 
     //Labels {
     //    id: label4
@@ -187,8 +166,8 @@ Rectangle {
         id: celIcon
         source: checkEngine.mil ? "images/cel_on.png" : "images/cel_off.png"
         anchors.horizontalCenter: parent.horizontalCenter
-        anchors.top: label3.bottom
-        anchors.topMargin: 100
+        anchors.top: parent.top
+        anchors.topMargin: 45
         width: 48
         height: 48
     }
@@ -231,22 +210,6 @@ Rectangle {
     //    anchors.horizontalCenter: label5.horizontalCenter
     //}
 
-    Labels {
-        id: label11
-        label: "Oil Pressure"
-        currValue: oilPressureLabel.currValue
-        unit: "psi"
-        fontSize: 18
-        color: "white"
-        borderColor: "#FF0000"
-        borderWidth: 2
-        borderRadius: 10
-        anchors.top: parent.top
-        anchors.topMargin: 10
-        anchors.left: label3.right
-    }
-
-
     BarMeter {
         id: temperatureBar
 
@@ -264,26 +227,6 @@ Rectangle {
         anchors.bottomMargin: 20
 
     }
-
-    BarMeter {
-        id: fualBar
-
-        mainValue: fuelLevelLabel.currValue
-        maxValue: 100
-
-        label_name: "Fuel"
-        unitValue: "%"
-
-        color: "transparent"    // Only changes the background color with the labels
-
-        anchors.right: parent.right
-        anchors.rightMargin: 20
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: 20
-
-    }
-
-    
 
     Button {
         id: switchButton

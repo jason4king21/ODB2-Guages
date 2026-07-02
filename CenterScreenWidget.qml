@@ -24,7 +24,7 @@ Rectangle {
     }*/
 
     Rectangle {
-        width: parent.width - 300
+        width: parent.width - 360
         height: 35
         color: "white"
 

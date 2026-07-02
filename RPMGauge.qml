@@ -8,9 +8,9 @@ import QtGraphicalEffects 1.0
 
 // Transparent Rectangle that holds everything
 Rectangle {
-    // Size of the widget
-    property int widget_width: 325
-    property int widget_height: 325
+    // Size of the widget (outer gauge ring). 325 * 0.9 = ~292 → 10% smaller outer circle.
+    property int widget_width: 292
+    property int widget_height: 292
 
     // Color of the Speedometer
     property string widget_color: "red"
@@ -51,7 +51,7 @@ Rectangle {
             }
 
             style: CircularGaugeStyle {
-                tickmarkStepSize: 1.0 // Tick Marks
+                tickmarkStepSize: 1000.0 // Tick Marks (true RPM: 0,1000,...,10000)
                 tickmark: Rectangle {
                     visible: styleData.value < 8000 || styleData.value % 1000 == 0
                     implicitWidth: outerRadius * 0.02
@@ -70,7 +70,8 @@ Rectangle {
 
                 tickmarkLabel:  Text {
                     font.pixelSize: Math.max(6, outerRadius * 0.1)
-                    text: styleData.value
+                    // Ring stays compact (1..10); the center readout shows true RPM.
+                    text: Math.round(styleData.value / 1000)
                     color: styleData.value >= 8000 ? widget_color : widget_color
                     antialiasing: true
                 }
@@ -98,10 +99,10 @@ Rectangle {
 
         }
 
-        // Value label for RPM
+        // Value label for RPM (inner circle). 150 * 1.2 = 180 → 20% larger inner circle.
         Rectangle {
-            width: 150
-            height: 150
+            width: 180
+            height: 180
             color: "black"
 
             anchors.centerIn: parent
@@ -118,7 +119,7 @@ Rectangle {
 
                 anchors.centerIn: parent
                 Text {
-                    text: "x1000 rpm"
+                    text: "rpm"
                     color: "white"
                     font.pixelSize: 12
                     anchors.top: parent.bottom

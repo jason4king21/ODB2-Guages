@@ -1,4 +1,4 @@
-import os, sys, datetime
+import os, sys, datetime, logging
 from PyQt5.QtCore import QObject, QUrl, pyqtSignal, Qt, pyqtProperty, QTimer, pyqtSlot
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtQuick import QQuickView
@@ -6,16 +6,30 @@ import py_obd, obd
 from obd import commands, OBDStatus
 import serial, pynmea2
 
+# python-OBD logs a "could not open port" ERROR on every reconnect attempt.
+# We surface connection state ourselves via report_obd_status(), so silence the
+# library's per-retry spam (CRITICAL) to keep a hardware-less dev run readable.
+logging.getLogger("obd").setLevel(logging.CRITICAL)
+
 connection = None
 last_reconnect = 0.0
+_last_obd_status = None  # only print OBD status when it changes
 
 def get_serial_ports():
-    # More reliable check for Raspberry Pi
-    is_pi = os.uname().machine.startswith("arm") or os.uname().machine.startswith("aarch")
+    # os.uname() only exists on POSIX; guard so this runs on Windows too.
+    is_pi = False
+    if hasattr(os, "uname"):
+        machine = os.uname().machine
+        is_pi = machine.startswith("arm") or machine.startswith("aarch")
 
-    gps_port = "/dev/ttyACM0"
-    obd_port = "/dev/rfcomm0"
-    qml_file = "/home/kyle/ODB2-Guages/dashboard.qml"
+    # Ports/paths can be overridden via environment variables so the same
+    # code runs on the Pi (defaults) or on a dev machine with no hardware.
+    gps_port = os.environ.get("GPS_PORT", "/dev/ttyACM0")
+    obd_port = os.environ.get("OBD_PORT", "/dev/rfcomm0")
+
+    # QML lives alongside this script; don't hardcode a user's home dir.
+    default_qml = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.qml")
+    qml_file = os.environ.get("DASH_QML", default_qml)
 
     print("[INFO] Detected Raspberry Pi:", is_pi)
     print("[INFO] GPS Port:", gps_port)
@@ -32,8 +46,12 @@ def set_update_rate(port="/dev/ttyACM0", rate_ms=100):
     for c in cmd[1:]:
         cs ^= ord(c)
     full = f"{cmd}{cs:02X}\r\n"
-    with serial.Serial(port, 9600, timeout=1) as s:
-        s.write(full.encode())
+    try:
+        with serial.Serial(port, 9600, timeout=1) as s:
+            s.write(full.encode())
+    except Exception as e:
+        # No GPS attached (e.g. dev machine) — skip rather than crash.
+        print(f"[WARN] Could not set GPS update rate on {port}: {e}")
 
 
 class CheckEngine(QObject):
@@ -63,12 +81,19 @@ class GPSSpeedReader(QObject):
 
     def __init__(self, port="/dev/ttyACM0", baud=115200, parent=None):
         super().__init__(parent)
-        self.port = serial.Serial(port, baudrate=baud, timeout=1)
+        try:
+            self.port = serial.Serial(port, baudrate=baud, timeout=1)
+        except Exception as e:
+            # No GPS attached — run without live speed instead of crashing.
+            print(f"[WARN] GPS serial port {port} unavailable: {e}")
+            self.port = None
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.read_speed)
         self.timer.start(100)
 
     def read_speed(self):
+        if self.port is None:
+            return
         try:
             raw = self.port.readline().decode('ascii', errors='ignore').strip()
             if raw.startswith('$GPRMC'):
@@ -111,7 +136,7 @@ class RPMMeter(QObject):
     def __init__(self):
         super().__init__()
         self._minRPM = 0.0
-        self._maxRPM = 10.0
+        self._maxRPM = 10000.0   # true RPM (gauge sweeps 0..10000)
         self._currRPM = 0.0
 
     @pyqtProperty(float, notify=RPMChanged)
@@ -192,9 +217,27 @@ class CenterScreenWidget(QObject):
 
 # — Utility Functions —
 
-def make_connection(port: str) -> obd.OBD:
-    # VPW/Class2 tends to be more reliable with fast=False and a slightly longer timeout
-    return obd.OBD(portstr=port, fast=False, timeout=2)
+def make_connection(port: str):
+    # VPW/Class2 tends to be more reliable with fast=False and a slightly longer timeout.
+    # Returns None when the adapter/port isn't present (e.g. dev machine).
+    try:
+        return obd.OBD(portstr=port, fast=False, timeout=2)
+    except Exception as e:
+        print(f"[WARN] Could not open OBD connection on {port}: {e}")
+        return None
+
+
+def obd_connected(conn) -> bool:
+    return conn is not None and conn.status() == OBDStatus.CAR_CONNECTED
+
+
+def report_obd_status(conn) -> None:
+    # Print only on change so a disconnected dev run doesn't spam every 2s.
+    global _last_obd_status
+    status = conn.status() if conn else "No connection"
+    if status != _last_obd_status:
+        print("OBD status:", status)
+        _last_obd_status = status
 
 
 # — Main Application —
@@ -206,8 +249,6 @@ if __name__ == "__main__":
     engine.addImportPath(os.path.join(os.getcwd(), "qml"))
 
     gps_port, obd_port, qml_file = get_serial_ports()
-
-    set_update_rate(gps_port, 100)
 
     # Instantiate
     temperature = BarMeter()
@@ -226,7 +267,6 @@ if __name__ == "__main__":
     throttleAcceleratorLabel = BarMeter()
     absoluteLoadLabel = BarMeter()
     cel = CheckEngine()
-    gps = GPSSpeedReader(gps_port)
     oilPressureLabel = BarMeter()
 
     # Expose to QML
@@ -252,15 +292,12 @@ if __name__ == "__main__":
     view.setSource(QUrl.fromLocalFile(qml_file))
     view.show()
 
-    # Wire GPS -> Speedometer (connect ONCE)
-    gps.speedUpdated.connect(speedometer.updateSpeed)
-
     # Connect to OBD
     connection = make_connection(obd_port)
-    print("OBD status:", connection.status())
+    report_obd_status(connection)
 
     # Only attempt PID discovery if connected (and never let it crash the UI)
-    if connection.status() == OBDStatus.CAR_CONNECTED:
+    if obd_connected(connection):
         try:
             py_obd.get_supported_pids_mode01(connection)
             py_obd.get_supported_pids_mode06(connection)
@@ -270,6 +307,7 @@ if __name__ == "__main__":
     last_reconnect = 0.0
 
     def set_disconnected_values():
+        speedometer.currSpeed = 0
         rpmmeter.currRPM = 0
         temperature.currValue = 0
         battery_capacity.currValue = 0
@@ -285,47 +323,69 @@ if __name__ == "__main__":
         cel.mil = True
         cel.dtcCount = 0
 
-    def update_all():
-        global last_reconnect, connection
-
-        centerScreen.update_now()
-
-        # If not connected, try to reconnect (rate-limited)
-        if connection.status() != OBDStatus.CAR_CONNECTED:
-            now = datetime.datetime.now().timestamp()
-            if now - last_reconnect > 2.0:
-                last_reconnect = now
-                try:
-                    connection.close()
-                except Exception:
-                    pass
-                connection = make_connection(obd_port)
-                print("OBD status:", connection.status())
-
-            set_disconnected_values()
-            return
-
-        # Connected: pull values
+    def _update_status():
         resp = connection.query(commands.STATUS)
         if resp and resp.value:
             cel.mil = bool(resp.value.MIL)
             cel.dtcCount = int(resp.value.DTC_count)
 
-        # RPM in thousands for your gauge
-        rpmmeter.currRPM = (py_obd.get_rpm(connection) or 0) / 1000
-        temperature.currValue = py_obd.get_temperature(connection) or 0
-        battery_capacity.currValue = py_obd.get_battery_voltage(connection) or 0
-        engineLoadLabel.currValue = py_obd.get_engine_load(connection) or 0
-        throttlePosLabel.currValue = py_obd.get_throttle_pos(connection) or 0
-        barometricPressureLabel.currValue = py_obd.get_barometric_pressure(connection) or 0
-        intakePressureLabel.currValue = py_obd.get_intake_pressure(connection) or 0
-        intakeTempLabel.currValue = py_obd.get_intake_temp(connection) or 0
-        absoluteLoadLabel.currValue = py_obd.get_absolute_load(connection) or 0
-        fuelLevelLabel.currValue = py_obd.get_fuel_level(connection) or 0
-        oilPressureLabel.currValue = py_obd.get_oil_pressure(connection) or 0
+    # Slow-changing readouts: one is refreshed per tick (round-robin) so the
+    # primary gauges (speed & RPM) aren't stuck waiting on ~13 serial
+    # round-trips every cycle. Each entry is (target_obj, attr, getter).
+    slow_updates = [
+        (None, None, _update_status),   # MIL / DTC count
+        (temperature, "currValue", py_obd.get_temperature),
+        (battery_capacity, "currValue", py_obd.get_battery_voltage),
+        (engineLoadLabel, "currValue", py_obd.get_engine_load),
+        (throttlePosLabel, "currValue", py_obd.get_throttle_pos),
+        (barometricPressureLabel, "currValue", py_obd.get_barometric_pressure),
+        (intakePressureLabel, "currValue", py_obd.get_intake_pressure),
+        (intakeTempLabel, "currValue", py_obd.get_intake_temp),
+        (absoluteLoadLabel, "currValue", py_obd.get_absolute_load),
+        (fuelLevelLabel, "currValue", py_obd.get_fuel_level),
+        (oilPressureLabel, "currValue", py_obd.get_oil_pressure),
+    ]
+    slow_index = 0
+
+    def update_all():
+        global last_reconnect, connection, slow_index
+
+        centerScreen.update_now()
+
+        # If not connected, try to reconnect (rate-limited)
+        if not obd_connected(connection):
+            now = datetime.datetime.now().timestamp()
+            if now - last_reconnect > 2.0:
+                last_reconnect = now
+                try:
+                    if connection:
+                        connection.close()
+                except Exception:
+                    pass
+                connection = make_connection(obd_port)
+                report_obd_status(connection)
+
+            set_disconnected_values()
+            return
+
+        # Fast path: refresh the two primary gauges every tick.
+        # True RPM straight from the ECU (no scaling).
+        rpmmeter.currRPM = py_obd.get_rpm(connection) or 0
+        # Vehicle speed (mph) from the PCM instead of GPS.
+        speedometer.currSpeed = py_obd.get_speed(connection) or 0
+
+        # Slow path: refresh exactly one secondary readout this tick.
+        obj, attr, getter = slow_updates[slow_index]
+        if obj is None:
+            getter()
+        else:
+            setattr(obj, attr, getter(connection) or 0)
+        slow_index = (slow_index + 1) % len(slow_updates)
 
     poll_timer = QTimer()
     poll_timer.timeout.connect(update_all)
-    poll_timer.start(100)
+    # 50 ms floor; on real hardware the OBD round-trips govern the actual rate,
+    # this just removes idle gap between cycles so gauges refresh as fast as the bus allows.
+    poll_timer.start(50)
 
     sys.exit(app.exec_())
