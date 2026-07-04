@@ -1,4 +1,4 @@
-import os, sys, datetime, logging
+import os, sys, datetime, logging, time
 from PyQt5.QtCore import QObject, QUrl, pyqtSignal, Qt, pyqtProperty, QTimer, pyqtSlot
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtQuick import QQuickView
@@ -300,6 +300,12 @@ if __name__ == "__main__":
     # GUI thread via a queued connection (safe cross-thread).
     last_reconnect = 0.0
 
+    # Monotonic timestamp of the last fresh reading from the car. Written by the
+    # worker-thread callbacks, read by tick() on the GUI thread (single float,
+    # atomic under the GIL). Wrapped in a list so the nested callbacks can update
+    # it without a `global` declaration. Used to detect a *silent* link drop.
+    last_data = [time.monotonic()]
+
     # --- Async callbacks (invoked on the OBD worker thread) ---
     # A null response means that one read failed (very common over a flaky
     # Bluetooth link). We intentionally HOLD the last value instead of writing
@@ -308,22 +314,26 @@ if __name__ == "__main__":
         v = r.value
         if v is not None:
             rpmmeter.currRPM = float(v.magnitude)
+            last_data[0] = time.monotonic()
 
     def on_speed(r):
         v = r.value
         if v is not None:
             speedometer.currSpeed = float(v.to("mph").magnitude)
+            last_data[0] = time.monotonic()
 
     def on_temp(r):
         v = r.value
         if v is not None:
             temperature.currValue = round(float(v.to("degF").magnitude), 1)
+            last_data[0] = time.monotonic()
 
     def on_status(r):
         v = r.value
         if v is not None:
             cel.mil = bool(v.MIL)
             cel.dtcCount = int(v.DTC_count)
+            last_data[0] = time.monotonic()
 
     # Only the gauges actually shown in the QML are watched, so the background
     # loop cycles as fast as possible. If you restore a gauge to the UI, add its
@@ -352,6 +362,9 @@ if __name__ == "__main__":
             for cmd, cb in WATCHED:
                 conn.watch(cmd, callback=cb)
             conn.start()
+            # Give the fresh loop a grace period before the stale-data watchdog
+            # can fire, so startup latency isn't mistaken for a dead link.
+            last_data[0] = time.monotonic()
         return conn
 
     def stop_async(conn):
@@ -369,6 +382,10 @@ if __name__ == "__main__":
     # Connect to OBD and start the background polling loop.
     connection = start_async()
 
+    # If the link dies silently (status() still says CONNECTED but no data is
+    # flowing), force a reconnect after this many seconds without a fresh reading.
+    STALE_TIMEOUT = 3.0
+
     def tick():
         """Main-thread heartbeat: update the clock and manage (re)connection.
         Live gauge data is pushed by the Async callbacks, not from here."""
@@ -376,13 +393,20 @@ if __name__ == "__main__":
 
         centerScreen.update_now()
 
-        # If not connected, keep the LAST gauge values on screen (don't zero them)
-        # and just keep trying to reconnect in the background (rate-limited). This
-        # rides through brief Bluetooth dropouts without the gauges collapsing.
-        if not obd_connected(connection):
-            now = datetime.datetime.now().timestamp()
+        now = time.monotonic()
+        connected = obd_connected(connection)
+        # Silent-drop watchdog: still "connected" but no callback has delivered a
+        # value for a while → the link is dead even though status() hasn't noticed.
+        data_stale = connected and (now - last_data[0] > STALE_TIMEOUT)
+
+        # When disconnected OR stale, keep the LAST gauge values on screen (don't
+        # zero them) and retry the connection in the background (rate-limited).
+        # This rides through brief Bluetooth dropouts without the gauges collapsing.
+        if (not connected) or data_stale:
             if now - last_reconnect > 2.0:
                 last_reconnect = now
+                if data_stale:
+                    print(f"[WARN] OBD data stale ({now - last_data[0]:.1f}s) — forcing reconnect")
                 stop_async(connection)
                 connection = start_async()
 
