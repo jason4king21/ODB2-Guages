@@ -8,6 +8,15 @@ import QtGraphicalEffects 1.0
 
 // Transparent Rectangle that holds everything
 Rectangle {
+    id: speedoRoot
+
+    // Smoothed value that BOTH the needle and the digital readout follow, so they
+    // glide between updates instead of snapping — and ride through jittery reads.
+    property real displaySpeed: speedometer.currSpeed
+    Behavior on displaySpeed {
+        NumberAnimation { duration: 250; easing.type: Easing.OutQuad }
+    }
+
     // Size of the widget
     property int widget_width: 325
     property int widget_height: 325
@@ -41,7 +50,7 @@ Rectangle {
             width: widget_width
             height: widget_height
 
-            value: speedometer.currSpeed
+            value: speedoRoot.displaySpeed
             maximumValue: speedometer.maxSpeed
             minimumValue: speedometer.minSpeed
 
@@ -171,7 +180,7 @@ Rectangle {
             radius: 360
 
             Text {
-                text: Math.round(speedometer.currSpeed)
+                text: Math.round(speedoRoot.displaySpeed)
                 color: "white"
                 font.pixelSize: 36
                 font.bold: true

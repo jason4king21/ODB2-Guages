@@ -8,6 +8,15 @@ import QtGraphicalEffects 1.0
 
 // Transparent Rectangle that holds everything
 Rectangle {
+    id: rpmRoot
+
+    // Smoothed value that BOTH the needle and the digital readout follow, so they
+    // glide between updates instead of snapping — and ride through jittery reads.
+    property real displayRPM: RPM_Meter.currRPM
+    Behavior on displayRPM {
+        NumberAnimation { duration: 250; easing.type: Easing.OutQuad }
+    }
+
     // Size of the widget (outer gauge ring). 325 * 0.9 = ~292 → 10% smaller outer circle.
     property int widget_width: 292
     property int widget_height: 292
@@ -42,7 +51,7 @@ Rectangle {
             height: widget_height
 
             // Add properties and bindings for RPM values
-            value: RPM_Meter.currRPM
+            value: rpmRoot.displayRPM
             maximumValue: RPM_Meter.maxRPM
             minimumValue: RPM_Meter.minRPM
 
@@ -112,7 +121,7 @@ Rectangle {
             radius: 360
 
             Text {
-                text: Math.round(RPM_Meter.currRPM)
+                text: Math.round(rpmRoot.displayRPM)
                 color: "white"
                 font.pixelSize: 36
                 font.bold: true

@@ -300,35 +300,24 @@ if __name__ == "__main__":
     # GUI thread via a queued connection (safe cross-thread).
     last_reconnect = 0.0
 
-    def set_disconnected_values():
-        speedometer.currSpeed = 0
-        rpmmeter.currRPM = 0
-        temperature.currValue = 0
-        battery_capacity.currValue = 0
-        engineLoadLabel.currValue = 0
-        throttlePosLabel.currValue = 0
-        barometricPressureLabel.currValue = 0
-        intakeTempLabel.currValue = 0
-        intakePressureLabel.currValue = 0
-        absoluteLoadLabel.currValue = 0
-        fuelLevelLabel.currValue = 0
-        oilPressureLabel.currValue = 0
-        # Show "disconnected" by turning MIL on (optional)
-        cel.mil = True
-        cel.dtcCount = 0
-
     # --- Async callbacks (invoked on the OBD worker thread) ---
+    # A null response means that one read failed (very common over a flaky
+    # Bluetooth link). We intentionally HOLD the last value instead of writing
+    # 0, so a single dropped frame doesn't make the gauge flick to zero.
     def on_rpm(r):
         v = r.value
-        rpmmeter.currRPM = float(v.magnitude) if v is not None else 0
+        if v is not None:
+            rpmmeter.currRPM = float(v.magnitude)
 
     def on_speed(r):
         v = r.value
-        speedometer.currSpeed = float(v.to("mph").magnitude) if v is not None else 0
+        if v is not None:
+            speedometer.currSpeed = float(v.to("mph").magnitude)
 
     def on_temp(r):
         v = r.value
-        temperature.currValue = round(float(v.to("degF").magnitude), 1) if v is not None else 0
+        if v is not None:
+            temperature.currValue = round(float(v.to("degF").magnitude), 1)
 
     def on_status(r):
         v = r.value
@@ -387,14 +376,15 @@ if __name__ == "__main__":
 
         centerScreen.update_now()
 
-        # If not connected, show zeros and try to reconnect (rate-limited).
+        # If not connected, keep the LAST gauge values on screen (don't zero them)
+        # and just keep trying to reconnect in the background (rate-limited). This
+        # rides through brief Bluetooth dropouts without the gauges collapsing.
         if not obd_connected(connection):
             now = datetime.datetime.now().timestamp()
             if now - last_reconnect > 2.0:
                 last_reconnect = now
                 stop_async(connection)
                 connection = start_async()
-            set_disconnected_values()
 
     # Cleanly stop the worker thread when the app quits.
     app.aboutToQuit.connect(lambda: stop_async(connection))
